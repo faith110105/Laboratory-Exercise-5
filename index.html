@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scholarship Monitoring System</title>
+<style>
+body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f6fb;color:#222}
+nav{background:#1f3a75;display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px}
+nav button{background:none;border:0;color:#fff;padding:8px 12px;cursor:pointer;border-radius:4px}
+nav button.on,nav button:hover{background:#3b5aa8}
+main,.box{max-width:1000px;margin:16px auto;padding:0 12px}.box{background:#fff;padding:20px;max-width:360px;margin-top:60px;border-radius:8px}
+.card{background:#fff;border-radius:8px;padding:14px;margin-bottom:14px;box-shadow:0 1px 3px #0002;overflow-x:auto}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.stat{background:#fff;padding:14px;border-radius:8px;text-align:center;box-shadow:0 1px 3px #0002}.stat b{font-size:28px;display:block}
+input,select{padding:7px;margin:3px 4px 3px 0;border:1px solid #bbb;border-radius:4px;font-size:14px}
+button.p{background:#1f3a75;color:#fff;border:0;padding:8px 14px;border-radius:4px;cursor:pointer}button.s{padding:4px 8px;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{border-bottom:1px solid #ddd;padding:6px;text-align:left}th{background:#eef2fa}
+.err{color:#b00020}.ok{color:#0a7d2c}.tag{padding:2px 8px;border-radius:10px;background:#e3e8f5;font-size:12px}
+</style></head><body><div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL='https://efoaprttvdpbdomzhstt.supabase.co', SUPABASE_KEY='sb_publishable_2_OgUSUb7o2GsNiEP3utKg_GVf65K1W';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const STATUSES=['Active','Pending Submission','For Verification','Compliant','With Deficiency','Probationary','For Renewal','Renewed','Disqualified'];
+const state={page:'dashboard',q:'',fp:'',fs:'',edit:null};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const msg=(t,e)=>{const m=$('#msg');if(m){m.textContent=t;m.className=e?'err':'ok'}};
+const opts=(a,sel)=>a.map(x=>`<option value="${esc(x.v)}" ${x.v==sel?'selected':''}>${esc(x.t)}</option>`).join('');
+const val=id=>$('#'+id).value.trim();
+
+async function go(p){state.page=p;state.edit=null;await render()}
+async function logout(){await sb.auth.signOut();await render()}
+async function login(){
+  const {error}=await sb.auth.signInWithPassword({email:val('em'),password:$('#pw').value});
+  if(error)return msg(error.message,1);await render();
+}
+async function render(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){$('#app').innerHTML=`<div class="box"><h2>Scholarship Monitoring</h2><input id="em" type="email" placeholder="Email" style="width:95%"><input id="pw" type="password" placeholder="Password" style="width:95%"><p><button class="p" onclick="login()">Login</button></p><p id="msg"></p></div>`;return}
+  const {data:pf}=await sb.from('profiles').select('role,full_name').eq('id',session.user.id).single();
+  if(!pf){$('#app').innerHTML=`<div class="box"><h2>No profile found</h2><p>Ask the administrator to set up your account.</p><button class="p" onclick="logout()">Logout</button></div>`;return}
+  state.role=pf.role;state.uid=session.user.id;
+  const all={dashboard:['Dashboard',pDash],scholars:['Scholars',pScholars],programs:['Scholarship Programs',pPrograms],subs:['Grade Submissions',pSubs],compliance:['Compliance',pComp],users:['Users',pUsers]};
+  const allowed={admin:Object.keys(all),staff:['dashboard','scholars','programs','subs','compliance'],scholar:['dashboard','programs','compliance']}[pf.role]||['dashboard'];
+  if(!allowed.includes(state.page))state.page='dashboard';
+  $('#app').innerHTML=`<nav>${allowed.map(k=>`<button class="${state.page==k?'on':''}" onclick="go('${k}')">${k==='dashboard'&&pf.role==='scholar'?'My Status':all[k][0]}</button>`).join('')}<button onclick="logout()">Logout (${esc(pf.full_name)} · ${pf.role})</button></nav><main id="main"></main>`;
+  await all[state.page][1]();
+}
+async function cnt(t,f){let q=sb.from(t).select('*',{count:'exact',head:true});if(f)q=f(q);return (await q).count??0}
+async function pDash(){
+  if(state.role==='scholar')return pMe();
+  const [a,b,c,d,e]=await Promise.all([cnt('scholars',q=>q.neq('status','Disqualified')),cnt('grade_submissions',q=>q.eq('submission_status','Pending')),cnt('grade_submissions',q=>q.eq('submission_status','Verified')),cnt('scholars',q=>q.eq('status','Compliant')),cnt('scholars',q=>q.eq('status','With Deficiency'))]);
+  const s=(n,l)=>`<div class="stat"><b>${n}</b>${l}</div>`;
+  $('#main').innerHTML=`<h2>Dashboard</h2><div class="stats">${s(a,'Total Scholars')}${s(b,'Pending Submissions')}${s(c,'Verified Submissions')}${s(d,'Compliant Scholars')}${s(e,'With Deficiency')}</div>`;
+}
+async function pPrograms(){
+  const {data}=await sb.from('scholarship_programs').select('*').order('program_name');
+  $('#main').innerHTML=`<h2>Scholarship Programs</h2>${state.role==='admin'?`<div class="card"><input id="pn" placeholder="Program name"><input id="pg" type="number" step="0.01" min="1" max="5" placeholder="Required GWA (max)"><input id="pu" type="number" min="0" placeholder="Min units"><label><input id="pf" type="checkbox"> Allow failing grade</label> <button class="p" onclick="saveProg()">Add</button><p id="msg"></p><small>Required GWA is the maximum allowed (1.0 = highest, 5.0 = fail); a scholar passes when GWA ≤ this value.</small></div>`:''}
+  <div class="card"><table><tr><th>Program</th><th>Required GWA (≤)</th><th>Min Units</th><th>Failing Allowed</th><th>Active</th></tr>${(data||[]).map(r=>`<tr><td>${esc(r.program_name)}</td><td>${r.required_gwa}</td><td>${r.min_units}</td><td>${r.allow_failing_grade?'Yes':'No'}</td><td>${state.role==='admin'?`<button class="s" onclick="toggleProg(${r.id},${!r.active})">${r.active?'Active':'Inactive'}</button>`:(r.active?'Active':'Inactive')}</td></tr>`).join('')}</table></div>`;
+}
+async function saveProg(){
+  const r={program_name:val('pn'),required_gwa:+val('pg'),min_units:+val('pu'),allow_failing_grade:$('#pf').checked};
+  if(!r.program_name)return msg('Program name is required.',1);
+  if(!(r.required_gwa>=1&&r.required_gwa<=5))return msg('Required GWA must be between 1.0 and 5.0.',1);
+  if(!(r.min_units>=0)||val('pu')==='')return msg('Minimum units cannot be negative or blank.',1);
+  const {error}=await sb.from('scholarship_programs').insert(r);if(error)return msg(error.message,1);
+  await render();msg('Program added.');
+}
+async function toggleProg(id,a){await sb.from('scholarship_programs').update({active:a}).eq('id',id);await render()}
+async function pScholars(){
+  const [{data:progs},{data:rows}]=await Promise.all([sb.from('scholarship_programs').select('id,program_name,active').order('program_name'),sb.from('scholars').select('*,scholarship_programs(program_name)').order('student_id')]);
+  const q=state.q.toLowerCase(),e=(rows||[]).find(r=>r.id==state.edit)||{};
+  const list=(rows||[]).filter(r=>(!q||r.student_id.toLowerCase().includes(q)||r.full_name.toLowerCase().includes(q))&&(!state.fp||r.scholarship_id==state.fp)&&(!state.fs||r.status==state.fs));
+  const po=(progs||[]).filter(p=>p.active||p.id==e.scholarship_id).map(p=>({v:p.id,t:p.program_name}));
+  $('#main').innerHTML=`<h2>Scholars</h2><div class="card"><b>${e.id?'Editing '+esc(e.student_id)+' (Update will REPLACE this record)':'Register new scholar'}</b><br><input id="sid" placeholder="Student ID" value="${esc(e.student_id)}"><input id="sname" placeholder="Full name" value="${esc(e.full_name)}"><input id="semail" type="email" placeholder="Login email (scholar account)" value="${esc(e.email)}"><input id="sdeg" placeholder="Degree program" value="${esc(e.degree_program)}"><input id="syr" type="number" min="1" max="6" placeholder="Year level" value="${esc(e.year_level)}"><select id="sprog"><option value="">-- Scholarship program --</option>${opts(po,e.scholarship_id)}</select><select id="sstat">${opts(STATUSES.map(x=>({v:x,t:x})),e.status||'Active')}</select><button class="p" onclick="saveScholar()">${e.id?'Update scholar':'Add scholar'}</button> ${e.id?'<button class="s" onclick="go(\'scholars\')">Cancel (add new instead)</button>':''}<p id="msg"></p></div>
+  <div class="card"><input id="fq" placeholder="Search ID or name" value="${esc(state.q)}" oninput="state.q=this.value;pScholars()"><select onchange="state.fp=this.value;pScholars()"><option value="">All programs</option>${opts((progs||[]).map(p=>({v:p.id,t:p.program_name})),state.fp)}</select><select onchange="state.fs=this.value;pScholars()"><option value="">All statuses</option>${opts(STATUSES.map(x=>({v:x,t:x})),state.fs)}</select>
+  <table><tr><th>Student ID</th><th>Name</th><th>Degree</th><th>Yr</th><th>Program</th><th>Status</th><th></th></tr>${list.map(r=>`<tr><td>${esc(r.student_id)}</td><td>${esc(r.full_name)}</td><td>${esc(r.degree_program)}</td><td>${r.year_level}</td><td>${esc(r.scholarship_programs?.program_name)}</td><td><span class="tag">${esc(r.status)}</span></td><td><button class="s" onclick="state.edit=${r.id};pScholars();scrollTo(0,0)">Edit</button></td></tr>`).join('')||'<tr><td colspan="7">No scholars found.</td></tr>'}</table></div>`;
+  if(document.activeElement===document.body&&state.q){const f=$('#fq');f.focus();f.setSelectionRange(f.value.length,f.value.length)}
+}
+async function saveScholar(){
+  const r={student_id:val('sid'),full_name:val('sname'),email:val('semail').toLowerCase()||null,degree_program:val('sdeg'),year_level:+val('syr'),scholarship_id:+val('sprog')||null,status:val('sstat')};
+  if(!r.student_id)return msg('Student ID cannot be blank.',1);
+  if(!r.full_name||!r.degree_program)return msg('Full name and degree program are required.',1);
+  if(!r.scholarship_id)return msg('Select a scholarship program.',1);
+  if(!(r.year_level>=1&&r.year_level<=6))return msg('Year level must be 1 to 6.',1);
+  const x=state.edit?await sb.from('scholars').update(r).eq('id',state.edit):await sb.from('scholars').insert(r);
+  if(x.error)return msg(x.error.code==='23505'?'Student ID or email already exists.':x.error.message,1);
+  state.edit=null;await render();msg('Scholar saved.');
+}
+async function pSubs(){
+  const [{data:sch},{data:rows}]=await Promise.all([sb.from('scholars').select('id,student_id,full_name').order('student_id'),sb.from('grade_submissions').select('*,scholars(student_id,full_name)').order('submitted_at',{ascending:false})]);
+  const num=(id,l,x)=>`<input id="${id}" type="number" ${x} placeholder="${l}" style="width:120px">`;
+  $('#main').innerHTML=`<h2>Grade Submissions</h2>${state.role==='scholar'&&!(sch||[]).length?'<p class="err">Your account is not linked to a scholar record yet. Ask staff to enter your login email on your scholar record.</p>':''}<div class="card"><b>New semester submission</b><br><select id="gs"><option value="">-- Scholar --</option>${opts((sch||[]).map(s=>({v:s.id,t:s.student_id+' - '+s.full_name})),state.role==='scholar'&&sch&&sch[0]?sch[0].id:'')}</select><input id="gy" placeholder="Academic year (2025-2026)"><select id="gm"><option>1st</option><option>2nd</option><option>Summer</option></select>${num('gg','GWA','step="0.01" min="1" max="5"')}${num('gu','Units enrolled','min="0"')}${num('gf','Failed subjects','min="0"')}${num('gi','Incomplete subjects','min="0"')}<button class="p" onclick="saveSub()">Submit</button><p id="msg"></p></div>
+  <div class="card"><table><tr><th>Scholar</th><th>AY / Sem</th><th>GWA</th><th>Units</th><th>Failed</th><th>Inc.</th><th>Status</th><th></th></tr>${(rows||[]).map(r=>`<tr><td>${esc(r.scholars?.student_id)} ${esc(r.scholars?.full_name)}</td><td>${esc(r.academic_year)} ${esc(r.semester)}</td><td>${r.gwa}</td><td>${r.units_enrolled}</td><td>${r.failed_subjects}</td><td>${r.incomplete_subjects}</td><td><span class="tag">${r.submission_status}</span></td><td>${r.submission_status==='Pending'&&state.role!=='scholar'?`<button class="s" onclick="verify(${r.id})">Verify</button> <button class="s" onclick="ret(${r.id})">Return</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8">No submissions yet.</td></tr>'}</table></div>`;
+}
+async function saveSub(){
+  const r={scholar_id:+val('gs')||null,academic_year:val('gy'),semester:val('gm'),gwa:parseFloat(val('gg')),units_enrolled:parseInt(val('gu')),failed_subjects:parseInt(val('gf')||0),incomplete_subjects:parseInt(val('gi')||0)};
+  if(!r.scholar_id)return msg('Select a scholar.',1);
+  if(!/^\d{4}-\d{4}$/.test(r.academic_year))return msg('Academic year must look like 2025-2026.',1);
+  if(!(r.gwa>=1&&r.gwa<=5))return msg('GWA must be between 1.0 and 5.0.',1);
+  if(!(r.units_enrolled>=0))return msg('Units cannot be negative or blank.',1);
+  if(r.failed_subjects<0||r.incomplete_subjects<0)return msg('Subject counts cannot be negative.',1);
+  const {error}=await sb.from('grade_submissions').insert(r);
+  if(error)return msg(error.code==='23505'?'A submission for this scholar, year and semester already exists.':error.message,1);
+  await render();msg('Saved as Pending (For Verification).');
+}
+async function verify(id){
+  const {data,error}=await sb.rpc('verify_submission',{p_id:id});
+  if(error)return alert(error.message);
+  await render();msg('Verified. Result: '+data);
+}
+async function ret(id){await sb.from('grade_submissions').update({submission_status:'Returned'}).eq('id',id).eq('submission_status','Pending');await render()}
+async function pComp(){
+  const {data}=await sb.from('grade_submissions').select('*,scholars(student_id,full_name,scholarship_programs(program_name,required_gwa,min_units,allow_failing_grade))').eq('submission_status','Verified').order('verified_at',{ascending:false});
+  $('#main').innerHTML=`<h2>Compliance Evaluations</h2><div class="card"><table><tr><th>Scholar</th><th>Program</th><th>AY / Sem</th><th>GWA (req ≤)</th><th>Units (min)</th><th>Failed</th><th>Result</th><th>Deficiency</th></tr>${(data||[]).map(r=>{const p=r.scholars?.scholarship_programs||{};return `<tr><td>${esc(r.scholars?.student_id)} ${esc(r.scholars?.full_name)}</td><td>${esc(p.program_name)}</td><td>${esc(r.academic_year)} ${esc(r.semester)}</td><td>${r.gwa} (${p.required_gwa})</td><td>${r.units_enrolled} (${p.min_units})</td><td>${r.failed_subjects}${p.allow_failing_grade?' (allowed)':''}</td><td><b class="${r.evaluation_result==='Compliant'?'ok':'err'}">${esc(r.evaluation_result)}</b></td><td>${esc(r.deficiency_notes)}</td></tr>`}).join('')||'<tr><td colspan="8">No verified submissions yet.</td></tr>'}</table></div>`;
+}
+async function pMe(){
+  const {data:rows,error}=await sb.from('scholars').select('*,scholarship_programs(*)').limit(1);
+  const s=(rows||[])[0];
+  if(!s)return $('#main').innerHTML='<h2>My Status</h2><div class="card err">Your account is not linked to a scholar record yet. Ask staff to enter your login email on your scholar record.'+(error?'<br>Error: '+esc(error.message):'')+'</div>';
+  const {data:l}=await sb.from('grade_submissions').select('*').eq('scholar_id',s.id).order('submitted_at',{ascending:false}).limit(1);
+  const p=s.scholarship_programs||{},g=(l||[])[0];
+  $('#main').innerHTML=`<h2>My Status</h2><div class="card"><b>${esc(s.full_name)}</b> (${esc(s.student_id)})<br>${esc(s.degree_program)}, year ${s.year_level}<br>Scholarship: ${esc(p.program_name)}<br>Status: <span class="tag">${esc(s.status)}</span></div>
+  <div class="card"><b>Requirements</b><br>GWA of ${p.required_gwa} or better · at least ${p.min_units} units · failing grades ${p.allow_failing_grade?'allowed':'not allowed'}</div>
+  <div class="card"><b>Latest submission</b><br>${g?`${esc(g.academic_year)} ${esc(g.semester)} — ${g.submission_status}${g.evaluation_result?` — <b>${esc(g.evaluation_result)}</b>`:''}${g.deficiency_notes?`<br><span class="err">${esc(g.deficiency_notes)}</span>`:''}`:'No submission yet. Grades are encoded by the scholarship staff.'}</div>`;
+}
+async function pUsers(){
+  const {data}=await sb.from('profiles').select('*').order('email');
+  $('#main').innerHTML=`<h2>Users</h2><div class="card"><p>Create logins in Supabase (Authentication &rarr; Users). Assign their role here. A scholar's login is linked by matching the email on their scholar record.</p><table><tr><th>Email</th><th>Name</th><th>Role</th></tr>${(data||[]).map(u=>`<tr><td>${esc(u.email)}</td><td>${esc(u.full_name)}</td><td><select onchange="setRole('${u.id}',this.value)">${opts(['admin','staff','scholar'].map(x=>({v:x,t:x})),u.role)}</select></td></tr>`).join('')}</table></div>`;
+}
+async function setRole(id,r){
+  if(id===state.uid){alert('You cannot change your own role.');return render()}
+  const {error}=await sb.from('profiles').update({role:r}).eq('id',id);if(error)alert(error.message);await render();
+}
+render();
+</script></body></html>
