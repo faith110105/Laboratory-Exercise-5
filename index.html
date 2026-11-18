@@ -15,8 +15,11 @@ table{border-collapse:collapse;width:100%;font-size:14px}th,td{border-bottom:1px
 </style></head><body><div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const SUPABASE_URL='https://ntoizvsjmrmhvxzgylva.supabase.co', SUPABASE_KEY='ssb_publishable_agFxgP0FufGjRiV2pTOF1Q_lUp7cu68';
-const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+// ===== CONFIG: paste the SAME key from Lab 4's config.js (SUPABASE_ANON_KEY) =====
+const SUPABASE_URL='https://ntoizvsjmrmhvxzgylva.supabase.co';
+const SUPABASE_KEY='PASTE-THE-SAME-KEY-FROM-LAB4';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{db:{schema:'lab5'}});
+// ================================================================================
 const STATUSES=['Active','Pending Submission','For Verification','Compliant','With Deficiency','Probationary','For Renewal','Renewed','Disqualified'];
 const state={page:'dashboard',q:'',fp:'',fs:'',edit:null};
 const $=s=>document.querySelector(s);
